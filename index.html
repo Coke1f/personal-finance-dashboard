@@ -303,7 +303,7 @@
       <button onclick="changeMonth(-1)">◀</button>
       <div class="month-label" id="monthLabel">2026年10月</div>
       <button onclick="changeMonth(1)">▶</button>
-      <button class="today-btn" onclick="setToken()" title="设置同步Token">⚙</button>
+      <button class="today-btn" style="display:none" onclick="setToken()" title="设置同步Token">⚙</button>
     </div>
   </div>
 
@@ -729,6 +729,12 @@ loadData().then(() => {
   }
   render();
 });
+
+// Desktop only: show settings button
+if (window.innerWidth >= 769) {
+  var settingsBtn = document.querySelector('.today-btn');
+  if (settingsBtn) settingsBtn.style.display = 'inline-block';
+}
 
 document.getElementById('modalOverlay').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
