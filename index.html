@@ -298,6 +298,7 @@
       <button onclick="changeMonth(-1)">◀</button>
       <div class="month-label" id="monthLabel">2026年10月</div>
       <button onclick="changeMonth(1)">▶</button>
+      <button class="today-btn" onclick="setToken()" title="设置同步Token">⚙</button>
     </div>
   </div>
 
@@ -379,30 +380,75 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// ========== 数据存储（浏览器本地）==========
+// ========== 数据存储（GitHub 云端同步）==========
 const STORAGE_KEY = 'personal_finance_v3';
+const TOKEN_KEY = 'gh_token';
+const GH_OWNER = 'Coke1f';
+const GH_REPO = 'personal-finance-dashboard';
+const GH_FILE = 'data.json';
 let financeData = {};
 let currentDate = new Date(2026, 9, 1);
 let today = new Date();
 let editingDateKey = null;
 let editingEntries = { income: [], expense: [] };
+let ghSha = null;
+
+function getGHToken() { return localStorage.getItem(TOKEN_KEY) || ''; }
+function ghApiUrl() { return `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${GH_FILE}`; }
+
+function promptToken() {
+  const existing = getGHToken();
+  if (existing) return Promise.resolve(existing);
+  const token = prompt('请输入 GitHub Token 以同步数据（只需一次）：\n\n在 https://github.com/settings/tokens 创建一个 Classic Token，勾选 repo 权限。');
+  if (token) { localStorage.setItem(TOKEN_KEY, token.trim()); return Promise.resolve(token.trim()); }
+  return Promise.resolve(null);
+}
+
+function setToken() {
+  const current = getGHToken();
+  const input = prompt('GitHub Token（留空清除）：\n\n当前：' + (current ? '已设置 ✅' : '未设置 ❌') + '\n\n在 https://github.com/settings/tokens 创建 Classic Token，勾选 repo 权限。');
+  if (input !== null) {
+    if (input.trim()) {
+      localStorage.setItem(TOKEN_KEY, input.trim());
+      showToast('Token 已设置，重新加载数据...');
+      loadData().then(() => render());
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+      showToast('Token 已清除');
+    }
+  }
+}
 
 // ========== 工具函数 ==========
 function loadData() {
-  return new Promise((resolve) => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) financeData = JSON.parse(raw);
-    } catch(e) { financeData = {}; }
-    resolve();
-  });
+  return fetch(ghApiUrl())
+    .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(data => {
+      ghSha = data.sha;
+      if (data.content) {
+        const decoded = atob(data.content.replace(/\n/g, ''));
+        financeData = JSON.parse(decoded);
+      }
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(financeData)); } catch(e) {}
+    })
+    .catch(() => {
+      try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) financeData = JSON.parse(raw); } catch(e) { financeData = {}; }
+    });
 }
 
 function saveData() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(financeData));
-  } catch(e) {}
-  return Promise.resolve();
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(financeData)); } catch(e) {}
+  const token = getGHToken();
+  if (!token) { return Promise.resolve(); }
+  const content = btoa(unescape(encodeURIComponent(JSON.stringify(financeData))));
+  return fetch(ghApiUrl(), {
+    method: 'PUT',
+    headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message: 'Update finance data', content: content, sha: ghSha || undefined })
+  })
+    .then(r => r.json())
+    .then(data => { if (data.content) ghSha = data.content.sha; })
+    .catch(() => {});
 }
 
 function dateKey(y, m, d) {
